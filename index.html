@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="anam-examples-main/html_js/stream_capture/styles.css">
+        <script type="module" src="main.js"></script>
+        <link href='https://cdn.jsdelivr.net/npm/boxicons@2.0.5/css/boxicons.min.css' rel='stylesheet'>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+        <title>Vox Chatbot</title>
+    </head>
+<body>
+    <header>
+        <h1>VOXLENS</h1> 
+        <nav>
+            <ul class="nav_links">
+                <a href="#home">HOME</a>
+                <a href="#about">MISSION</a>
+                <a href="#services">PRODUCT</a>
+                <a href="#voxApp">APP</a>
+                <a href="#subs">SUBSCRIPTIONS</a>
+                <a href="#Testimonials">TESTIMONIALS</a>
+            </ul>
+            <button class="hamburger">
+                <div class="bar"></div>
+                <div class="bar"></div>
+                <div class="bar"></div>
+            </button>
+        </nav>
+        <div class="cta" onclick="window.location.href='#contact'">
+            <button>Contact</button>
+        </div>
+    </header>
+
+    <section id="home">
+        <div class="home_interact"></div>
+        <h2 class="home__title"><br>Voxlens</h2>
+        <h3>Assistive Technology</h3>
+        <h4 class="typewriter">Empowering Vision Beyond Sight</h4>
+
+        <ul class="social-icons">
+            <li><a href="https://www.instagram.com/dhruvv_singh18/" target="_blank"><i class="fab fa-instagram"></i></a></li>
+            <li><a href="https://www.linkedin.com/in/dhruv-singh-448149312/" target="_blank"><i class="fab fa-linkedin-in"></i></a></li>
+        </ul>
+
+        <div class="image-container">
+            <img id="voxImage" src="anam-examples-main/html_js/stream_capture/voxhome.jpeg">
+            <video id="anamVideo" autoplay muted style="display: none;"></video>
+        </div>
+    </section>
+
+    <video id="anamVideo" autoplay muted></video>
+    <audio id="anamAudio" autoplay></audio>
+
+    <div class="session">
+        <div class="aboutbut">
+            <button onclick="startSession()">Start Session</button>
+        </div>
+        <div class="aboutbut">
+            <button onclick="endSession()">End Session</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/@anam-ai/js-sdk@1.5.0/dist/umd/anam.js"></script>
+    <script>
+        let userMediaRecorder = null;
+        let personaMediaRecorder = null;
+        let userChunks = [];
+        let personaChunks = [];
+        let anamClient = null;
+
+        async function startSession() {
+            userChunks = [];
+            personaChunks = [];
+
+            const { unsafe_createClientWithApiKey } = window.anam;
+            anamClient = unsafe_createClientWithApiKey(
+                'Mjg3OWQ2N2UtYTk3My00ZGM4LTlkNWItZWU0NjhmN2QzMjIwOklqNnVya283RGNqby91bmtJN3pxMmt6eDJUZzBFQXVlS3NOUDk2Z3ZMQnM9',
+                { personaId: 'c3fc9052-1d74-4edc-a121-3fb70e4b54f0' }
+            );
+
+            try {
+                const userInputStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                userMediaRecorder = new MediaRecorder(userInputStream);
+                userMediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) userChunks.push(event.data);
+                };
+                userMediaRecorder.start(100);
+
+                const [videoStream] = await anamClient.stream(userInputStream);
+
+                const videoElement = document.getElementById('anamVideo');
+                videoElement.srcObject = videoStream;
+                videoElement.play().catch(console.error);
+
+                const audioTracks = videoStream.getAudioTracks();
+                if (audioTracks.length > 0) {
+                    const personaAudioStream = new MediaStream(audioTracks);
+                    const audioElement = document.getElementById('anamAudio');
+                    audioElement.srcObject = personaAudioStream;
+                    audioElement.play().catch(console.error);
+
+                    personaMediaRecorder = new MediaRecorder(personaAudioStream);
+                    personaMediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) personaChunks.push(event.data);
+                    };
+                    personaMediaRecorder.start(100);
+                }
+
+                // 🧠 Override default brain with custom backend
+                anamClient.onTranscript = async (message) => {
+  const userText = message.text;
+  console.log("User said:", userText);
+
+  // Send to your custom LLM
+  const response = await fetch("http://localhost:8000/ask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: userText })
+  });
+
+  const data = await response.json();
+  anamClient.talk(data.response);  // Vox responds with your custom answer
+};
+
+            } catch (error) {
+                console.error('Error during startSession:', error);
+            }
+
+            document.getElementById('voxImage').style.display = 'none';
+            document.getElementById('anamVideo').style.display = 'block';
+
+            alert("Session started! Press Ok to Proceed to Speak.");
+
+            anamClient.talk("Hi, I am Vox, how can I assist you today?");
+
+            anamClient.addListener(
+  AnamEvent.MESSAGE_HISTORY_UPDATED,
+  async (messageHistory) => {
+    if (messageHistory.length > 0) {
+      const latestMessage = messageHistory[messageHistory.length - 1];
+
+      // Only respond to user messages (ignore system messages or others)
+      if (latestMessage.role === "user") {
+        // Call your custom brain (LLM model) to get a response based on the message history
+        const response = await getCustomBrainResponse(messageHistory);
+
+        // Instruct Anam's AI to speak the response
+        anamClient.talk(response);
+      }
+    }
+  }
+);
+
+async function getCustomBrainResponse(messageHistory) {
+  // Create a prompt based on the message history (joining all messages into one prompt)
+  const prompt = messageHistory.map(msg => msg.content).join("\n");
+
+  // Generate the response using your fine-tuned GPT-2 model (or whatever model you use)
+  const response = await getResponseFromCustomLLM(prompt);
+
+  return response; // Return the generated response
+}
+
+async function getResponseFromCustomLLM(prompt) {
+  const inputs = tokenizer(prompt, return_tensors="pt", padding=true, truncation=true);
+  const outputs = model.generate(
+    inputs['input_ids'],
+    max_length=150,
+    num_return_sequences=1,
+    do_sample=true,
+    top_k=50,
+    top_p=0.9,
+    temperature=0.7,
+    no_repeat_ngram_size=2,
+    repetition_penalty=1.2,
+    eos_token_id=tokenizer.eos_token_id
+  );
+  
+  // Decode the generated response into a human-readable string
+  const response = tokenizer.decode(outputs[0], skip_special_tokens=true);
+  
+  return response.trim(); // Remove extra spaces or unwanted characters
+}
+
+        }
+
+        function endSession() {
+            if (userMediaRecorder && userMediaRecorder.state !== 'inactive') userMediaRecorder.stop();
+            if (personaMediaRecorder && personaMediaRecorder.state !== 'inactive') personaMediaRecorder.stop();
+
+            const timestamp = Date.now();
+            const userBlob = new Blob(userChunks, { type: 'audio/webm' });
+            const personaBlob = new Blob(personaChunks, { type: 'audio/webm' });
+
+            const userAudioUrl = URL.createObjectURL(userBlob);
+            const personaAudioUrl = URL.createObjectURL(personaBlob);
+
+            const userLink = document.createElement('a');
+            const personaLink = document.createElement('a');
+            userLink.href = userAudioUrl;
+            personaLink.href = personaAudioUrl;
+            userLink.download = `user-audio-${timestamp}.webm`;
+            personaLink.download = `persona-audio-${timestamp}.webm`;
+            userLink.click();
+            personaLink.click();
+
+            URL.revokeObjectURL(userAudioUrl);
+            URL.revokeObjectURL(personaAudioUrl);
+
+            const videoElement = document.getElementById('anamVideo');
+            if (videoElement.srcObject) {
+                videoElement.srcObject.getTracks().forEach(track => track.stop());
+                videoElement.srcObject = null;
+            }
+
+            const audioElement = document.getElementById('anamAudio');
+            if (audioElement.srcObject) {
+                audioElement.srcObject.getTracks().forEach(track => track.stop());
+                audioElement.srcObject = null;
+            }
+
+            if (anamClient) {
+                anamClient.stopStreaming();
+                anamClient = null;
+            }
+
+            document.getElementById('anamVideo').style.display = 'none';
+            document.getElementById('voxImage').style.display = 'block';
+
+            alert("Session ended!");
+        }
+    </script>
+</body>
+</html>
